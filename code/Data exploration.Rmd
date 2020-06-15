@@ -1,0 +1,149 @@
+---
+title: "Ferritin determinants"
+author: "Marieke Vinkenoog"
+date: "22/04/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(lavaan)
+```
+
+## Donor data
+
+Donor and donation data is extracted from eProgesa. The following variables are selected:
+- DonorID      : unique donor ID
+- Sex          : donor sex 
+- Age          : donor age at day of donation, in years
+- Date         : donation date (== index donation)
+- Ferritin     : ferritin measured in ng/mL
+- DonType      : donation type, V = whole-blood donation, N = new donor intake, H = repeat measurement
+- DaysSincePrev: number of days since previous donation (NA if DonType == N)
+- NumBefore    : number of donations made before index donation in the past two years
+- BloodType    : donor main blood group (A/B/AB/O neg/pos)
+- BloodVolume  : donor blood volume, estimated from height and weight, in litres
+- BMI          : donor BMI, calculated from height and weight
+- Duffy        : donor Duffy status (pos/neg)
+
+
+```{r}
+ddata_raw <- read.delim("X:/202003 Ferritine en omgeving/Werkbestand_socio_ecological_new.dat")
+ddata_raw <- ddata_raw %>% mutate_at(vars(Geboortedatum, Donatiedatum, IndexDonatie), as.Date, format='%m/%d/%Y')
+
+ddata <- ddata_raw[ddata_raw$IndexDonatie == ddata_raw$Donatiedatum, 
+                   c('KeyID', 'Geboortedatum', 'Geslacht', 'Donatiedatum', 'Hb', 'Ferritine', 'donatiesoort', 
+                     'DagenLaatsteDonatie', 'AantalBeforeIndex', 'Bloedgroep', 'bloedvolume',
+                     'BMI', 'Duffy_proxy')]
+colnames(ddata) <- c('DonorID', 'DoB', 'Sex', 'Date', 'Hb', 'Ferritin', 'DonType', 'DaysSincePrev', 'NumBefore', 
+                     'BloodType', 'BloodVolume', 'BMI', 'Duffy')
+ddata$Sex <- as.factor(ddata$Sex)
+ddata$DonType <- factor(ddata$DonType, levels=c(0,1,2,3), labels=c('V', 'H', 'N', 'Other'))
+ddata$Duffy <- factor(ddata$Duffy, levels=c(0,1), labels=c('No', 'Yes'))
+ddata$Age <- as.numeric(ddata$Date - ddata$DoB) / 365.25
+ddata <- ddata[c('DonorID', 'Sex', 'Age', 'Date', 'Ferritin', 'DonType', 'DaysSincePrev', 'NumBefore', 
+                 'BloodType', 'BloodVolume', 'BMI', 'Duffy')]
+
+ddata <- ddata[ddata$DonType %in% c('N', 'V'), ]
+ddata$DonType <- droplevels(ddata$DonType)
+ddata$DonorID <- as.factor(ddata$DonorID)
+
+ddata <- subset(ddata, !(DonType=='N' & !is.na(DaysSincePrev)))
+
+```
+
+```{r}
+g <- ggplot(ddata[ddata$DonType %in% c('N', 'V'), ], aes(x=Ferritin)) +
+  facet_grid(rows=vars(DonType), cols=vars(Sex)) +
+  geom_histogram() + xlim(0,300)
+
+g
+```
+
+
+```{r}
+ggplot(ddata, aes(x=BMI)) + 
+  facet_grid(rows=vars(Sex), cols=vars(DonType)) +
+  geom_histogram(binwidth=1)  + xlim(c(17,45))
+```
+
+
+```{r}
+library(summarytools)
+
+with(ddata, stby(ddata, list(Sex, DonType), descr, stats=c('q1', 'med', 'q3', 'n.valid'), transpose=TRUE))
+
+
+
+```
+
+
+
+
+
+
+## Inspect data visually (normality check)
+
+```{r}
+ga <- ggplot(donordata) +
+   facet_grid(rows=vars(DonType), cols=vars(Sex)) +
+   theme_minimal()
+
+gb <- ggplot(donordata) +
+   facet_grid(cols=vars(Sex)) +
+   theme_minimal()
+
+g1 <- ga + geom_histogram(aes(x=Age))
+g2 <- ga + geom_histogram(aes(x=Date))
+g3 <- ga + geom_histogram(aes(x=Ferritin)) + xlim(c(0,300))
+gb + geom_histogram(aes(x=DaysSincePrev)) + xlim(c(0,365*2))
+# gb + geom_histogram(aes(x=NumBefore)) 
+ga + geom_histogram(aes(x=BloodVolume))
+ga + geom_histogram(aes(x=BMI))
+```
+
+
+## Summarize data numerically
+
+```{r}
+summary_func <- function(x) {
+  
+}
+
+
+donordata %>% 
+  group_by(Sex, DonType)  %>%
+  summarise()
+
+
+
+
+```
+
+
+## SEM model specification
+
+```{r}
+modelA <- '
+  # measurement model
+  cDonations =~ DaysSincePrev + DonType
+  cDonor     =~ Sex + Age + BloodVolume + BMI + Duffy
+  
+  # regressions
+  Ferritin  ~  cDonations + cDonor
+  
+  # residual correlations
+  Sex ~~ Age
+  BloodVolume ~~ BMI
+  Age ~~ BMI
+'
+
+fit <- sem(modelA, data=donordata)
+summary(fit, standardized=TRUE)
+```
+
+
+
