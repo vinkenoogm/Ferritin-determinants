@@ -1,0 +1,17 @@
+---
+title: "Data preparation"
+author: "Marieke Vinkenoog"
+date: "15/06/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r}
+data <- readRDS("X:/202003 Ferritine en omgeving/donordata_with_temps_env.RDS")
+```
+
