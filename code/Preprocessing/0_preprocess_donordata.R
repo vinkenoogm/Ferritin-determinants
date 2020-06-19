@@ -1,4 +1,6 @@
-ddata_raw <- read.delim("X:/202003 Ferritine en omgeving/Werkbestand_socio_ecological_new.dat")
+library(dplyr)
+
+ddata_raw <- read.delim("X:/202003 Ferritine en omgeving/Raw data/donations_201710_201912.dat")
 ddata_raw <- ddata_raw %>% mutate_at(vars(Geboortedatum, Donatiedatum, IndexDonatie), as.Date, format='%m/%d/%Y')
 
 ddata <- ddata_raw[ddata_raw$IndexDonatie == ddata_raw$Donatiedatum, 

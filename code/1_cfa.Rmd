@@ -1,0 +1,18 @@
+---
+title: "Confirmatory Factor Analysis"
+author: "Marieke Vinkenoog"
+date: "19/06/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lavaan)
+library(ggplot2)
+```
+
+
+```{r}
+data <- readRDS("X:/202003 Ferritine en omgeving/donordata_with_temps_env_cleaned.RDS")
+```
+

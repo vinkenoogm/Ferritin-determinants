@@ -1,7 +1,7 @@
 ---
 title: "Data preparation"
 author: "Marieke Vinkenoog"
-date: "15/06/2020"
+date: "18/06/2020"
 output: html_document
 ---
 
@@ -9,9 +9,83 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(ggplot2)
 library(lubridate)
+library(dummies)
+```
+
+# Load data
+Data has been preprocessed and merged. Only the Time variable is missing, which
+we will include from the raw data file.
+
+```{r warning=FALSE}
+data <- readRDS("X:/202003 Ferritine en omgeving/donordata_with_temps_env.RDS")
+ddata_raw <- read.delim("X:/202003 Ferritine en omgeving/Raw data/donations_201710_201912.dat")
+ddata_raw$Donatiedatum <- as.Date(ddata_raw$Donatiedatum, format="%m/%d/%Y")
+data <- merge(data, ddata_raw[c("KeyID", "Donatiedatum", "Donatie_Tijd_Start", "Hb")],
+              by.x=c("DonorID", "Date"), by.y=c("KeyID", "Donatiedatum"))
+colnames(data)[29] <- "Time"
+rm(ddata_raw)
+```
+
+# Variables
+The data set contains 30 variables and 140713 observations. Each observation is 
+a ferritin measurement from a successful blood donation (DonType V) or from
+a new donor intake (DonType N). Each donor only occurs once in the data set.
+
+Numerical variables: Age, DaysSincePrev, NumBefore, BloodVolume, BMI, 
+                     AvgTemp (1/7/30), MinTemp (1/7/30), MaxTemp (1/7/30),
+                     SES, PopDensity, O3, PM25, M10, EC, NO2
+Binary variables   : Sex, Duffy
+Datetime variables : Date, Time
+
+Numerical variables are ready to go.
+Binary variables must be recoded as 0/1 (currently factors).
+Datetime variables need to be recoded: time will be represented as a float
+and date will be represented by two variables (sin&cos) to account for
+the cyclical nature of the variable. (Models don't know that December 31st and
+January 1st are close otherwise.) Year is disregarded. Recoded date&time can
+be used as numerical variables in the model.
+
+```{r warning=FALSE}
+data$Sex <- dummy(data$Sex)[, 1]       # 0 for male, 1 for female
+data$Duffy <- dummy(data$Duffy)[, 1]   # 0 for yes, 1 for no
+data$Time <- as.numeric(substr(data$Time, 0, 2)) + as.numeric(substr(data$Time, 4, 5)) / 60
+data[, c("Date_sin", "Date_cos")] <- cyclic_encoding(data$Date, "year")
+```
+# Inspect variables for outliers
+
+Temperature variables have been checked for outliers during preprocessing,
+so we can leave those be.
+
+```{r}
+summary(data[c("Age", "Ferritin", "DaysSincePrev", "NumBefore", "BloodVolume",
+               "BMI", "SES", "PopDensity", "O3", "PM25", "PM10", "EC", "NO2")])
+```
+Suspicious variables: Ferritin (max), DaysSincePrev (min), BloodVolume (min), BMI (min&max).
+We remove the following observations:
+- Ferritin > 350 (normal range for men goes up to 336 ng/mL, higher values can indicate underlying conditions)
+- DaysSincePrev < 56 (minimum inter-donation interval for men)
+- BloodVolume < 3 (minimum 'normal' BV for a 50 kg woman (minimum weight for blood donors) is 3.2L)
+- BMI < 16 or > 50 (lower or higher values are likely due to incorrect height/weight recorded)
+
+Also remove the 25 observations that have NA values for all environmental variables.
+
+```{r}
+data <- data[data$Ferritin <= 350, ]              # 913 observations removed
+data <- data[(is.na(data$DaysSincePrev)) | 
+             (data$DaysSincePrev >= 56), ]        # 1528 observations removed 
+data <- data[!(is.na(data$BloodVolume)) & 
+              (data$BloodVolume > 3.2), ]         # 189 observations removed
+data <- data[!(is.na(data$BMI)) & 
+              (data$BMI > 16) & 
+              (data$BMI < 50), ]                  # 46 observations removed
+data <- data[!(is.na(data$NO2)), ]                # 25 observations removed
 ```
 
 ```{r}
-data <- readRDS("X:/202003 Ferritine en omgeving/donordata_with_temps_env.RDS")
+summary(data[c("Age", "Ferritin", "DaysSincePrev", "NumBefore", "BloodVolume",
+               "BMI", "SES", "PopDensity", "O3", "PM25", "PM10", "EC", "NO2")])
+```
+```{r}
+saveRDS(data, "X:/202003 Ferritine en omgeving/donordata_with_temps_env_cleaned.RDS")
 ```
 
