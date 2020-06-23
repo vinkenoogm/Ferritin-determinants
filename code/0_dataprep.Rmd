@@ -51,6 +51,7 @@ data$Sex <- dummy(data$Sex)[, 1]       # 0 for male, 1 for female
 data$Duffy <- dummy(data$Duffy)[, 1]   # 0 for yes, 1 for no
 data$Time <- as.numeric(substr(data$Time, 0, 2)) + as.numeric(substr(data$Time, 4, 5)) / 60
 data[, c("Date_sin", "Date_cos")] <- cyclic_encoding(data$Date, "year")
+data$DayOfYear <- yday(data$Date)
 ```
 # Inspect variables for outliers
 
