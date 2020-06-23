@@ -23,6 +23,7 @@ ddata_raw$Donatiedatum <- as.Date(ddata_raw$Donatiedatum, format="%m/%d/%Y")
 data <- merge(data, ddata_raw[c("KeyID", "Donatiedatum", "Donatie_Tijd_Start", "Hb")],
               by.x=c("DonorID", "Date"), by.y=c("KeyID", "Donatiedatum"))
 colnames(data)[29] <- "Time"
+colnames(data)[7] <- "TimeSincePrev"
 rm(ddata_raw)
 ```
 
@@ -71,14 +72,15 @@ Also remove the 25 observations that have NA values for all environmental variab
 
 ```{r}
 data <- data[data$Ferritin <= 350, ]              # 913 observations removed
-data <- data[(is.na(data$DaysSincePrev)) | 
-             (data$DaysSincePrev >= 56), ]        # 1528 observations removed 
+data <- data[(is.na(data$TimeSincePrev)) | 
+             (data$TimeSincePrev >= 56), ]        # 1528 observations removed 
 data <- data[!(is.na(data$BloodVolume)) & 
               (data$BloodVolume > 3.2), ]         # 189 observations removed
 data <- data[!(is.na(data$BMI)) & 
               (data$BMI > 16) & 
               (data$BMI < 50), ]                  # 46 observations removed
 data <- data[!(is.na(data$NO2)), ]                # 25 observations removed
+data[data$Hb > 100, 'Hb'] <- NA
 ```
 
 ```{r}
