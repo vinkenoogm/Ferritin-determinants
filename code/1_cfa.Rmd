@@ -9,10 +9,187 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(lavaan)
 library(ggplot2)
+library(DiagrammeR)
 ```
-
 
 ```{r}
 data <- readRDS("X:/202003 Ferritine en omgeving/donordata_with_temps_env_cleaned.RDS")
 ```
+
+# Variable selection - temperature measurement
+
+There are several measurement options available for temperature: average, 
+minimum and maximum temperature, each for 1 day (the day before the donation),
+7-day average before donation, and 30-day average before donation, so nine
+options total. For each measurement option we fit a simple linear model
+that corrects for donor sex and age. The option that results in the model with the
+lowest residual standard error will be used in the analysis.
+
+We hypothesize a temperature effect on ferritin because of its known effect on
+hemoglobin. As sanity check, we also fit the same nine linear models with Hb as
+outcome variable.
+
+```{r}
+tempcheck <- matrix(0, nrow=0, ncol=2)
+colnames(tempcheck) <- c('RSE ferritin', 'RSE Hb')
+
+for (tempvar in c('AvgTemp', 'AvgTemp7', 'AvgTemp30', 
+                  'MinTemp', 'MinTemp7', 'MinTemp30',
+                  'MaxTemp', 'MaxTemp7', 'MaxTemp30')) {
+   formula_fer <- as.formula(paste('Ferritin ~', tempvar, '* Sex * Age'))
+   formula_hb <- as.formula(paste('Hb ~', tempvar, '* Sex * Age'))
+   sd_fer <- summary(lm(formula_fer, data=data))$sigma
+   sd_hb <- summary(lm(formula_hb, data=data))$sigma
+   tempcheck <- rbind(tempcheck, c(sd_fer, sd_hb))
+}
+rownames(tempcheck) <- c('AvgTemp', 'AvgTemp7', 'AvgTemp30', 
+                         'MinTemp', 'MinTemp7', 'MinTemp30',
+                         'MaxTemp', 'MaxTemp7', 'MaxTemp30')
+print(tempcheck)
+```
+
+RSE is lowest using MaxTemp, for both ferritin and Hb (although differences
+are very minimal). We will only use MaxTemp in the rest of the analysis and
+disregard the other temperature variables.
+
+
+```{r}
+data <- data[, c(1:12, 19, 22:32)]
+```
+
+# Variances
+
+Standardizing variables is not required for SEM, and in fact discouraged because
+it complicates interpretation of the parameter estimations. However, when 
+variances of the variables differ substantially due to measuring scales,
+the model can become ill-conditioned. For the algorithm to work optimally, all
+variances must be within factor 10 of each other. This is done by dividing or
+multiplying variables by a constant, this does not affect the parameter 
+estimations, only the interpretations. 
+
+```{r}
+numericols <- c('Age', 'Sex', 'Ferritin', 'TimeSincePrev', 'NumBefore',
+                'BloodVolume', 'BMI', 'Duffy', 'MaxTemp', 'SES', 'PopDensity',
+                'O3', 'PM25', 'PM10', 'EC', 'NO2', 'Time', 'Date_sin', 
+                'Date_cos')
+varTable(data[, numericols])
+```
+
+Variances range from 0.035 (EC) to 23207.106 (DaysSincePrev). We rescale all
+variables to have a variance between 0.1-10.
+
+```{r}
+data0 <- data
+data <- data0
+
+data$Age <- data$Age / 10                        # Age in decades
+data$Ferritin <- data$Ferritin / 100             # Ferritin in 100ng/ml
+data$TimeSincePrev <- data$TimeSincePrev / 365   # Time in years
+data$BMI <- data$BMI / 10                        # BMI in 10kg/m^2
+data$MaxTemp <- data$MaxTemp / 10                # Temperature in dC
+data$PopDensity <- data$PopDensity / 100         # Population in 100 inhabitants/km^2
+data$EC <- data$EC * 10                          # Soot in 10ug/m^3
+data$NO2 <- data$NO2 / 10                        # NO2 in 10ug/m^3
+data$Time <- data$Time / 10                      # Time in tens of hours
+
+varTable(data[, numericols])
+```
+
+
+
+
+# Confirmatory Factor Analysis
+
+Before considering the full model including the relations between latent constructs,
+we carry out a confirmatory factor analysis (CFA). This is the measurement part
+of the Structural Equation Model (SEM), which is later followed by the structural part. 
+The CFA tests whether the observed variables that the researcher has chosen to measure
+the latent construct do so consistently. We must first develop a hypothesis about
+which latent constructs are underlying the measures that are available in the data set.
+
+In the end we will compare four similar models that differ slightly in both the
+measurement part and the structural part, but contain the same observed variables.
+
+## Model A
+
+```{r echo=FALSE}
+grViz("
+      digraph boxes_and_circles {
+      
+      graph [layout = neato, overlap=scale]
+      
+      node [shape = oval]
+      'Donor characteristics'; Donations; 'Physical environment'; Pollution
+      
+      node [shape = box]
+      Soot; 'PM2.5'; PM10; Ozone; 'Population density'; Temperature; SES;
+      'Number of donations'; 'Time since previous donation'; Sex; Age; 
+      'Blood volume'; BMI; Duffy; Ferritin [penwidth = 3]
+      
+      'Donor characteristics'->Sex
+      'Donor characteristics'->Age
+      'Donor characteristics'->'Blood volume' 
+      'Donor characteristics'-> BMI
+      'Donor characteristics'->Duffy
+      
+      Donations->'Number of donations'
+      Donations->'Time since previous donation'
+      
+      'Physical environment'->'Population density'
+      'Physical environment'->Temperature
+      'Physical environment'->SES
+      
+      Pollution->Soot
+      Pollution->'PM2.5'
+      Pollution->PM10
+      Pollution->Ozone
+      
+      'Donor characteristics'->Ferritin
+      Donations->Ferritin
+      'Physical environment'->Ferritin
+      Pollution->Ferritin
+      }
+      
+      
+      ")
+```
+
+Model A contains four latent constructs: Donor characteristics, Donations,
+Physical environment and Pollution.
+
+```{r}
+modelA <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
+           Donations =~ NumBefore + TimeSincePrev + Time
+           Env       =~ SES + PopDensity + MaxTemp
+           Pollution =~ O3 + PM25 + PM10 + EC + NO2'
+modelA_Donchar <- 'DonChar   =~ Sex + Age + BloodVolume + Duffy'
+
+summary(cfa(modelA_Donchar, data=data))
+
+
+modelA_Donations <- 'Donations =~ NumBefore + YearsSincePrev + Time + Date_sin + Date_cos'
+modelA_Env <- 'Env =~ SES + PopDensity + AvgTemp'
+modelA_Pollution <- 'Pollution =~ O3 + PM25 + PM10 + EC + NO2'
+
+fitA <- cfa(modelA, data=data, check.gradient=FALSE)
+varTable(fitA)
+summary(fitA, fit.measures=TRUE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
