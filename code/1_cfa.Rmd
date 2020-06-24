@@ -2,7 +2,8 @@
 title: "Confirmatory Factor Analysis"
 author: "Marieke Vinkenoog"
 date: "19/06/2020"
-output: html_document
+output: rmarkdown::github_document
+always_allow_html: true
 ---
 
 ```{r setup, include=FALSE}
@@ -10,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(lavaan)
 library(ggplot2)
 library(DiagrammeR)
+library(zoo)
 ```
 
 ```{r}
@@ -54,7 +56,7 @@ disregard the other temperature variables.
 
 
 ```{r}
-data <- data[, c(1:12, 19, 22:32)]
+data <- data[, c(1:12, 19, 22:33)]
 ```
 
 # Variances
@@ -71,7 +73,7 @@ estimations, only the interpretations.
 numericols <- c('Age', 'Sex', 'Ferritin', 'TimeSincePrev', 'NumBefore',
                 'BloodVolume', 'BMI', 'Duffy', 'MaxTemp', 'SES', 'PopDensity',
                 'O3', 'PM25', 'PM10', 'EC', 'NO2', 'Time', 'Date_sin', 
-                'Date_cos')
+                'Date_cos', 'DayOfYear')
 varTable(data[, numericols])
 ```
 
@@ -79,9 +81,6 @@ Variances range from 0.035 (EC) to 23207.106 (DaysSincePrev). We rescale all
 variables to have a variance between 0.1-10.
 
 ```{r}
-data0 <- data
-data <- data0
-
 data$Age <- data$Age / 10                        # Age in decades
 data$Ferritin <- data$Ferritin / 100             # Ferritin in 100ng/ml
 data$TimeSincePrev <- data$TimeSincePrev / 365   # Time in years
@@ -91,11 +90,13 @@ data$PopDensity <- data$PopDensity / 100         # Population in 100 inhabitants
 data$EC <- data$EC * 10                          # Soot in 10ug/m^3
 data$NO2 <- data$NO2 / 10                        # NO2 in 10ug/m^3
 data$Time <- data$Time / 10                      # Time in tens of hours
+data$DayOfYear <- data$DayOfYear / 100           # Day of year / 100
 
 varTable(data[, numericols])
 ```
 
-
+Variances now range from 0.123 (Time) to 6.745 (NumBefore) which should not
+be a problem.
 
 
 # Confirmatory Factor Analysis
@@ -103,12 +104,42 @@ varTable(data[, numericols])
 Before considering the full model including the relations between latent constructs,
 we carry out a confirmatory factor analysis (CFA). This is the measurement part
 of the Structural Equation Model (SEM), which is later followed by the structural part. 
-The CFA tests whether the observed variables that the researcher has chosen to measure
-the latent construct do so consistently. We must first develop a hypothesis about
-which latent constructs are underlying the measures that are available in the data set.
+The CFA tests the construct validity; whether the observed variables that the 
+researcher has chosen to measure the latent construct do so consistently. We must 
+first develop a hypothesis about which latent constructs are underlying the measures 
+that are available in the data set.
 
 In the end we will compare four similar models that differ slightly in both the
 measurement part and the structural part, but contain the same observed variables.
+Constructs will be inspected for each model separately. The data will also be
+split into new donors and repeat donors, as the variable 'time since previous
+donation' is not available for new donors, and 'number of previous donations'
+will always be zero. The lack of information on these two variables make the
+'Donation' construct useless for new donors, and CFA/SEM is not well-equipped
+to deal with 'missing' data at this scale.
+
+There are two facets to construct validity that need to be inspected:
+
+* Convergent validity: do the indicators of each construct converge, and share
+  a high proportion of their variance?
+* Discriminant validity: is each construct truly distinct from all other constructs?
+
+In other words, convergent validity measures whether variables that _should_
+be related to each other (according to the hypothesis) are observed to be related 
+to each other, and discriminant validity measures whether variables that 
+_should not_ be related to each other (according to the hypothesis) are
+observed not to be related to each other. 
+
+Note: the default estimator is maximum likelihood (ML). However, we choose to use
+diagonally weighted least squares (WLSMV) for two reasons: 
+
+1. Its ability to incorporate non-continuous observed variables. There are only
+two of these in our data set (Sex and Duffy) but considering the known large impact
+of Sex on Ferritin levels, WLSMV becomes more attractive than ML.
+2. WLSMV makes no distributional assumptions on observed variables, unlike ML,
+which assumes normality. Many continuous variables in our data set are do not
+follow a normal distribution, e.g. Age which has a bimodal distribution, and 
+BMI which is known to be positively skewed.
 
 ## Model A
 
@@ -155,30 +186,119 @@ grViz("
 ```
 
 Model A contains four latent constructs: Donor characteristics, Donations,
-Physical environment and Pollution.
+Physical environment and Pollution. The Donations construct is not available
+for new donors.
 
 ```{r}
-modelA <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
-           Donations =~ NumBefore + TimeSincePrev + Time
-           Env       =~ SES + PopDensity + MaxTemp
-           Pollution =~ O3 + PM25 + PM10 + EC + NO2'
-modelA_Donchar <- 'DonChar   =~ Sex + Age + BloodVolume + Duffy'
+data_r <- data[data$DonType == 'V', ]
+data_n <- data[data$DonType == 'N', ]
 
-summary(cfa(modelA_Donchar, data=data))
+modelA_n <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
+             Env       =~ SES + PopDensity + MaxTemp
+             Pollution =~ O3 + PM25 + PM10 + EC + NO2'
+
+fitA_n <- cfa(modelA_n, data=data_n, check.gradient=FALSE, estimator="WLSMV")
+
+summary(fitA_n, standardized=TRUE, fit.measures=TRUE)
+
+modelA_r <- 'DonChar   =~ Sex + Age + BloodVolume + BMI
+             Donation  =~ TimeSincePrev + NumBefore 
+             Env       =~ SES + PopDensity + MaxTemp 
+             Pollution =~ O3 + PM25 + PM10 + EC + NO2'
+
+fitA_r <- cfa(modelA_r, data=data_r, check.gradient=FALSE, estimator="WLSMV")
+
+summary(fitA_r, standardized=TRUE, fit.measures=TRUE)
+```
+### Interpretation
+
+We interpret the CFA models based on the TLI (relative measure of fit)
+and the RMSEA (absolute measure of fit). 
+
+For new donors, TLI of the model is 0.945. Generally, a value of 0.95 or 
+higher indicates good fit. Our model falls just below this cutoff. The robust 
+RMSEA is 0.047 (90% CI 0.046-0.048). RMSEA below 0.08 represent a good fit.
+
+For repeat donors, TLI is 0.915, and RMSEA is 0.058 (90% CI 0.057-0.059). 
+This model includes one more construct than the one for new donors, yet fits 
+the data slightly worse. 
+
+We also inspect the 
 
 
-modelA_Donations <- 'Donations =~ NumBefore + YearsSincePrev + Time + Date_sin + Date_cos'
-modelA_Env <- 'Env =~ SES + PopDensity + AvgTemp'
-modelA_Pollution <- 'Pollution =~ O3 + PM25 + PM10 + EC + NO2'
 
-fitA <- cfa(modelA, data=data, check.gradient=FALSE)
-varTable(fitA)
-summary(fitA, fit.measures=TRUE)
+```{r}
+inspect(fitA_n, what="std")$psi
+inspect(fitA_r, what="std")$psi
 ```
 
 
 
 
+
+
+
+
+```{r}
+factanal(~Sex+Age+BloodVolume+BMI+Duffy+SES+PopDensity+DayOfYear+Date_sin+
+          Date_cos+DayOfYear+MaxTemp+Time+O3+PM25+PM10+EC+NO2,
+         factors=4, data=data, rotation="promax")
+```
+
+## Model B
+
+```{r}
+modelB_n <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
+             Env       =~ SES + PopDensity + O3 + PM25 + PM10 + EC + NO2'
+
+fitB_n <- cfa(modelB_n, data=data_n, check.gradient=FALSE, estimator="WLSMV")
+
+summary(fitB_n, ci=TRUE, standardized=TRUE, fit.measures=TRUE)
+
+modelB_r <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
+             Env       =~ SES + PopDensity + O3 + PM25 + PM10 + EC + NO2
+             Donation  =~ TimeSincePrev + NumBefore'
+
+fitB_r <- cfa(modelB_r, data=data_r, check.gradient=FALSE, estimator="WLSMV")
+
+summary(fitB_r, fit.measures=TRUE)
+
+inspect(fitA_n, what="std")
+
+lavInspect(fitA_n, "cov.lv")
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Goodness-of-fit indicators
+
+There are many goodness-of-fit and badness-of-fit available for CFA/SEM models.
+
+* Chi-square: usually a reasonable measure of fit, but only for models with
+fewer than 400 cases. With our sample sizes, Chi-square will always be
+significant, so we will not take it into account.
+* Root Mean Square Error of Approximation (RMSEA): currently the most popular
+measure of model fit. It is an absolute measure of fit and includes a complexity
+penalty. It is slightly positively biased, and thus a conservative measure of fit.
+Cutoffs of 0.01, 0.05, 0.08 (0.10 suggested by some) indicate excellent, good
+and mediocre fit respectively.
+* Tucker-Lewis Index: 
 
 
 
