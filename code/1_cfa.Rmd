@@ -93,6 +93,8 @@ data$Time <- data$Time / 10                      # Time in tens of hours
 data$DayOfYear <- data$DayOfYear / 100           # Day of year / 100
 
 varTable(data[, numericols])
+
+saveRDS(data, "X:/202003 Ferritine en omgeving/donordata_with_temps_env_scaled.RDS")
 ```
 
 Variances now range from 0.123 (Time) to 6.745 (NumBefore) which should not
@@ -201,7 +203,7 @@ fitA_n <- cfa(modelA_n, data=data_n, check.gradient=FALSE, estimator="WLSMV")
 
 summary(fitA_n, standardized=TRUE, fit.measures=TRUE)
 
-modelA_r <- 'DonChar   =~ Sex + Age + BloodVolume + BMI
+modelA_r <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
              Donation  =~ TimeSincePrev + NumBefore 
              Env       =~ SES + PopDensity + MaxTemp 
              Pollution =~ O3 + PM25 + PM10 + EC + NO2'
@@ -219,86 +221,178 @@ For new donors, TLI of the model is 0.945. Generally, a value of 0.95 or
 higher indicates good fit. Our model falls just below this cutoff. The robust 
 RMSEA is 0.047 (90% CI 0.046-0.048). RMSEA below 0.08 represent a good fit.
 
-For repeat donors, TLI is 0.915, and RMSEA is 0.058 (90% CI 0.057-0.059). 
+For repeat donors, TLI is 0.923, and RMSEA is 0.052 (90% CI 0.052-0.053). 
 This model includes one more construct than the one for new donors, yet fits 
 the data slightly worse. 
 
-We also inspect the 
+Next, we inspect the residual correlations between the observed variables.
+The covariance matrix expected by the model is compared to the covariance matrix
+observed in the data, the differences between these are the residuals of the
+CFA model. Large residual covariances can indicate that there is a relation
+between two variables that the model doesn't capture. Generally speaking, 
+residuals <|0.1| are considered fine. 
 
+```{r}
+residuals(fitA_n, type="cor")
+residuals(fitA_r, type="cor")
+```
+A few residual covariances spark interest. For new donors:
+
+* BMI and Age (0.220)
+* PopDensity and Age (-0.113)
+* PM2.5 and PM10 (0.128)
+* NO2 and PopDensity (0.101)
+
+For repeat donors:
+* BMI and Sex (0.164), Age (0.128) and BloodVolume (0.174)
+* PopDensity and Age (-0.201)
+* PM2.5 and PM10 (0.108)
+* EC and Age (-0.104)
+* NO2 and Age (-0.117)
+
+We also look at the modification indices, which tell us for each fixed parameter
+how much the model would improve if we freed that parameter (i.e. added a 
+covariance or relation between those variables into the model).
+
+Since CFA is a _confirmatory_ model and not an _exploratory_ one, adding parameters
+based on modification indices or high residual variance carries the risk of
+overfitting on the data. However, inspecting these values is valuable to discover
+which parts of the model fit well and which can be improved.
+
+```{r}
+modindices(fitA_n, standardized=TRUE, sort=TRUE)
+modindices(fitA_r, standardized=TRUE, sort=TRUE)
+```
+The modification indices suggest the same relations as the residual covariances,
+and also include suggestions for new relations between latent constructs and 
+observed variables.
+
+A high residual covariance between two observed variables that load on the same
+latent construct (e.g. BMI and Age, BMI and BloodVolume) indicates that these
+variables are more tightly correlated to each other than they are to the other
+variables related to that construct. A high residual covariance between two
+observed variables that are not related to the same construct suggests that 
+maybe they do share an underlying latent construct.
+
+We choose not to incorporate new parameters based on the residual covariances
+and modification indices, because the overall model fit is reasonable and
+the residual covariances are not much higher than the threshold for consideration.
+Most suggested relations to add between variables that do not load on the same
+latent construct include age, which may be explained by a non-uniform geographical 
+distribution of age among donors. E.g. perhaps most young donors are students 
+living in cities (higher pollution), while donors living are 'rural' areas are
+more likely to be older. However, it does not make theoretical sense to say that
+the observed variable Age should be related to the latent construct Pollution.
+
+Finally, we inspect the factor loadings (convergent validity) and covariances
+between latent constructs (discriminant validity). 
 
 
 ```{r}
-inspect(fitA_n, what="std")$psi
-inspect(fitA_r, what="std")$psi
+inspect(fitA_n, what="est")[c('lambda', 'psi')]
+inspect(fitA_r, what="est")[c('lambda', 'psi')]
 ```
-
-
-
-
-
-
-
-
-```{r}
-factanal(~Sex+Age+BloodVolume+BMI+Duffy+SES+PopDensity+DayOfYear+Date_sin+
-          Date_cos+DayOfYear+MaxTemp+Time+O3+PM25+PM10+EC+NO2,
-         factors=4, data=data, rotation="promax")
-```
+We notice that the latent factors Environment and Pollution have a relatively
+high covariance in both new and repeat donors. The second hypothesized model
+combines the variables in both constructs into one construct, and this high
+covariance suggests that the other model might have a better fit. The Duffy
+variable doesn't add any value to the model for new donors and very little
+for repeat donors.
 
 ## Model B
 
+We assess model B the same way as model A. Model B contains one fewer construct:
+the Environment and Pollution constructs are combined into one construct which
+we simply call Environment. 
+
+
+```{r echo=FALSE}
+grViz("
+      digraph boxes_and_circles {
+      
+      graph [layout = neato, overlap=scale]
+      
+      node [shape = oval]
+      'Donor characteristics'; Donations; Environment
+      
+      node [shape = box]
+      Soot; 'PM2.5'; PM10; Ozone; 'Population density'; Temperature; SES;
+      'Number of donations'; 'Time since previous donation'; Sex; Age; 
+      'Blood volume'; BMI; Duffy; Ferritin [penwidth = 3]
+      
+      'Donor characteristics'->Sex
+      'Donor characteristics'->Age
+      'Donor characteristics'->'Blood volume' 
+      'Donor characteristics'->BMI
+      'Donor characteristics'->Duffy
+      
+      Donations->'Number of donations'
+      Donations->'Time since previous donation'
+      
+      Environment->'Population density'
+      Environment->Temperature
+      Environment->SES
+      Environment->Soot
+      Environment->'PM2.5'
+      Environment->PM10
+      Environment->Ozone
+      
+      'Donor characteristics'->Ferritin
+      Donations->Ferritin
+      Environment->Ferritin
+      }
+      
+      
+      ")
+```
+
 ```{r}
 modelB_n <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
-             Env       =~ SES + PopDensity + O3 + PM25 + PM10 + EC + NO2'
+             Env       =~ SES + PopDensity + MaxTemp + O3 + PM25 + PM10 + EC + NO2'
 
 fitB_n <- cfa(modelB_n, data=data_n, check.gradient=FALSE, estimator="WLSMV")
 
-summary(fitB_n, ci=TRUE, standardized=TRUE, fit.measures=TRUE)
+summary(fitB_n, standardized=TRUE, fit.measures=TRUE)
 
 modelB_r <- 'DonChar   =~ Sex + Age + BloodVolume + BMI + Duffy
-             Env       =~ SES + PopDensity + O3 + PM25 + PM10 + EC + NO2
+             Env       =~ SES + PopDensity + MaxTemp + O3 + PM25 + PM10 + EC + NO2
              Donation  =~ TimeSincePrev + NumBefore'
 
 fitB_r <- cfa(modelB_r, data=data_r, check.gradient=FALSE, estimator="WLSMV")
 
-summary(fitB_r, fit.measures=TRUE)
+summary(fitB_r, standardized=TRUE, fit.measures=TRUE)
+```
 
-inspect(fitA_n, what="std")
+For new donors, TLI is 0.941 and RMSEA 0.049 (90% CI 0.048-0.050). For repeat
+donors, TLI is 0.923 and RMSEA 0.053 (90% CI 0.052-0.053). These are acceptable
+model fits. We check the residuals:
 
-lavInspect(fitA_n, "cov.lv")
+```{r}
+residuals(fitB_n, type="cor")
+residuals(fitB_r, type="cor")
+```
+A few residual covariances spark interest. For new donors:
 
+* BMI and Age (0.221)
+* PopDensity and Age (-0.115)
+* PM2.5 and PM10 (0.128)
+* NO2 and PopDensity (0.101)
 
+For repeat donors:
+* BMI and Sex (0.164), Age (0.128) and BloodVolume (0.174)
+* PopDensity and Age (-0.201)
+* PM2.5 and PM10 (0.108)
+* EC and Age (-0.104)
+* NO2 and Age (-0.117)
 
-
-
+```{r}
+inspect(fitB_n, what="est")[c('lambda', 'psi')]
+inspect(fitB_r, what="est")[c('lambda', 'psi')]
 ```
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-## Goodness-of-fit indicators
-
-There are many goodness-of-fit and badness-of-fit available for CFA/SEM models.
-
-* Chi-square: usually a reasonable measure of fit, but only for models with
-fewer than 400 cases. With our sample sizes, Chi-square will always be
-significant, so we will not take it into account.
-* Root Mean Square Error of Approximation (RMSEA): currently the most popular
-measure of model fit. It is an absolute measure of fit and includes a complexity
-penalty. It is slightly positively biased, and thus a conservative measure of fit.
-Cutoffs of 0.01, 0.05, 0.08 (0.10 suggested by some) indicate excellent, good
-and mediocre fit respectively.
-* Tucker-Lewis Index: 
 
 
 
